@@ -1,12 +1,12 @@
-use std::fs::*;
-use std::fs;
-use std::path::Path;
-use std::collections::LinkedList;
-use std::{thread, time::Duration};
-use std::io::{BufReader, BufRead, Error,ErrorKind};
+use std::fs::{self,*};
+use std::path::{Path};
+use std::collections::{LinkedList, HashSet};
+use std::io::{BufReader,BufRead,Error,ErrorKind};
 use colored::*;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar};
 use comment_parser::{self, SyntaxRule, get_syntax_from_path,CommentParser};
+use std::fmt;
+use prettytable::{Table};
 
 
 pub enum Urgency {
@@ -14,26 +14,54 @@ pub enum Urgency {
     FIXME,
     HACK,
     XXX,
+    CUSTOM,
+}
+
+impl fmt::Display for Urgency {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       match *self {
+           Urgency::TODO => write!(f, "TODO"),
+           Urgency::FIXME => write!(f, "FIXME"),
+           Urgency::HACK => write!(f, "HACK"),
+           Urgency::XXX => write!(f, "XXX"),
+           _ => write!(f, ""),
+       }
+    }
 }
 pub struct Packet {
     pub task: String,
     pub path : String,
-    pub line_n : i32,
     pub urgency: Urgency,
 }
 
 impl Packet {
-    pub fn new(task: String, path: String,line_n: i32, urgency: Urgency) -> Self {
+    pub fn new(task: String, path: String,urgency: Urgency) -> Self {
         Packet {
             task,
             path,
-            line_n,
             urgency,
         }
     }
-
-    
 }
+
+pub fn output_todos(mode: i32, todos: LinkedList<Packet>, outputfile: Option<&str>) -> Result<(), Error> {
+
+    let mut tables = Table::new();
+    tables.add_row(row![bFg->"TYPE",bFb->"TASK",bFw->"LOCATION"]);
+    for task in todos.iter() {
+        tables.add_row(row![ bFw->(*task).urgency, bFb->(*task).task,bFw->(*task).path]);
+    }
+
+    if let Some(filename) = outputfile {
+        File::create(filename).expect(&format!("{} {}", "Something went wrong creating output file -> ".red().bold(),filename));
+        fs::write(filename, &tables.to_string() ).expect(&format!("{} {}","Error writing to file -> ".red().bold(),filename));
+    }
+    
+    if mode == 1 {tables.printstd();}
+
+    Ok(())
+}
+
 
 pub fn get_size<P>(path: P) -> std::io::Result<u64> where P: AsRef<Path>,{
     let mut result = 0;
@@ -69,7 +97,7 @@ fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut Linked
                     _ => {continue;},
                 };
 
-                let pack = Packet::new(_urgency.1.to_string(), filename.path().into_os_string().into_string().unwrap(), 0, urgency);
+                let pack = Packet::new(_urgency.1.to_string(), filename.path().into_os_string().into_string().unwrap(), urgency);
                 todos.push_back(pack);
             }
                 
@@ -108,17 +136,21 @@ fn get_todos(filename: &DirEntry) -> Option<LinkedList<Packet>> {
 }
 
 
-pub fn iter_dir(path: String, pb: &ProgressBar) -> Result<(i32,i32, LinkedList<Packet>), Error> {
+pub fn iter_dir(path: String, pb: &ProgressBar, gitignore: &Option<HashSet<String>>) -> Result<(i32,i32, LinkedList<Packet>), Error> {
     let files = if let Ok(open_file) = fs::read_dir(&path) {open_file} else {return Err(Error::new(ErrorKind::Other, format!("{} {}", "Could not read the directory:".red().bold(),path)));};
 
     let mut todos:LinkedList<Packet> = LinkedList::new();
     let mut filecount = 0;
     let mut fileopenned = 0;
-    
 
-    for file in files {                                                     // for all entries in directory
-        if let Ok(ref this_file) = file {                                               // if this file is something and we have  permission to read it
-            if !this_file.path().is_dir() {                                                      // if this is a file then we try to get todos, if we fail then we continue the loop and increase filecount
+    for file in files {                                                     
+        if let Ok(ref this_file) = file {                                               
+            if let Some(gitfiles) = gitignore {
+                if gitfiles.contains(&this_file.path().into_os_string().into_string().unwrap()) {
+                    continue;
+                }
+            }
+            if !this_file.path().is_dir() {                                                      
                 pb.inc(this_file.metadata().expect("Cant open this files metadata: ").len());
                 filecount += 1;
                 if let Some(mut b) = get_todos(this_file) {
@@ -130,7 +162,7 @@ pub fn iter_dir(path: String, pb: &ProgressBar) -> Result<(i32,i32, LinkedList<P
                 }
             }
             else {
-                if let Ok((numc,numo,mut packs)) = iter_dir(this_file.path().into_os_string().into_string().unwrap(),&pb) {
+                if let Ok((numc,numo,mut packs)) = iter_dir(this_file.path().into_os_string().into_string().unwrap(),&pb, gitignore)  {
                     todos.append(&mut packs);
                     filecount += numc;
                     fileopenned += numo;
@@ -147,4 +179,23 @@ pub fn iter_dir(path: String, pb: &ProgressBar) -> Result<(i32,i32, LinkedList<P
         }
     }
     return Ok((filecount,fileopenned,todos));
+}
+
+
+
+pub fn get_ignorables() -> Option<HashSet<String>> {
+    let file = if let Ok(_file) = File::open(".gitignore"){
+        _file
+    }
+    else {
+        return None;
+    };
+    let reader = BufReader::new(file);
+    let mut ignorables = HashSet::new();
+
+    for line in reader.lines() {
+        if let Ok(_line) = line {ignorables.insert(_line);}
+    }
+    println!("{:?}",ignorables);
+    return Some(ignorables);
 }
