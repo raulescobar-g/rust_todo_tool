@@ -8,8 +8,6 @@ use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use clap::{Arg, App}; 
 
-
-//TODO: fix gitignore matching ???
 //TODO: print perhaps like the path in a tree if requested in args (mehhh maybe not idk ill see)
 //TODO: package app somehow
 //TODO: deploy to homebrew

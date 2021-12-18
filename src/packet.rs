@@ -6,6 +6,7 @@ use indicatif::{ProgressBar};
 use comment_parser::{self, SyntaxRule, get_syntax_from_path,CommentParser};
 use std::fmt;
 use prettytable::{Table};
+use chrono::prelude::*;
 
 #[derive(PartialEq)]
 pub enum Urgency {
@@ -48,20 +49,21 @@ impl Packet {
 pub fn output_todos(todos: LinkedList<Packet>, outputfile: Option<&str>, custom: &String) -> Result<(), Error> {
 
     let mut tables = Table::new();
-    tables.add_row(row![bFg->"TYPE",bFb->"TASK",bFw->"LOCATION",bFp->"LINE"]);
+    tables.add_row(row![bFg->"Type",bFw->"Task",bFm->"Path",bFr->"Line"]);
     for task in todos.iter() {
         if (*task).urgency == Urgency::CUSTOM {
-            tables.add_row(row![bFw->custom , bFb->(*task).task,bFw->(*task).path,bFp->(*task).line]);
+            tables.add_row(row![bFg->custom , bFw->(*task).task,bFm->(*task).path,bFr->(*task).line]);
         }
         else {
-            tables.add_row(row![bFw->(*task).urgency , bFb->(*task).task,bFw->(*task).path,bFp->(*task).line]);
+            tables.add_row(row![bFg->(*task).urgency , bFw->(*task).task,bFm->(*task).path,bFr->(*task).line]);
         }
         
     }
 
     if let Some(filename) = outputfile {
         File::create(filename).expect(&format!("{} {}", "Something went wrong creating output file -> ".red().bold(),filename));
-        fs::write(filename, &tables.to_string() ).expect(&format!("{} {}","Error writing to file -> ".red().bold(),filename));
+        let right_now = Local::now();
+        fs::write(filename, format!("Updated: {}\n{}",right_now.to_string(), &tables.to_string())).expect(&format!("{} {}","Error writing to file -> ".red().bold(),filename));
     }
     
     tables.printstd();
@@ -77,7 +79,13 @@ pub fn get_size(gitignore: &Option<Vec<String>>, path: &String) -> Option<u64> {
         if let Ok(_entry) = entry{
             let ignorable = should_ignore(gitignore, &_entry);
             if !_entry.path().is_dir() && !ignorable {
-                result += _entry.metadata().unwrap().len();
+                result += if let Ok(meta) = _entry.metadata() {
+                    meta.len()
+                }
+                else {
+                    println!("Did not read file: {:?}",_entry);
+                    0
+                }
             } 
             else if !ignorable {
                 result += if let Some(res) = get_size(gitignore,&_entry.path().into_os_string().into_string().unwrap()){res} else {0}
