@@ -1,3 +1,4 @@
 /target
 .DS_Store
-.todos.txt
+todos.txt
+Cargo.lock

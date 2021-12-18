@@ -1,6 +1,5 @@
 use std::fs::{self,*};
-use std::path::{Path};
-use std::collections::{LinkedList, HashSet};
+use std::collections::{LinkedList};
 use std::io::{BufReader,BufRead,Error,ErrorKind};
 use colored::*;
 use indicatif::{ProgressBar};
@@ -8,7 +7,7 @@ use comment_parser::{self, SyntaxRule, get_syntax_from_path,CommentParser};
 use std::fmt;
 use prettytable::{Table};
 
-
+#[derive(PartialEq)]
 pub enum Urgency {
     TODO,
     FIXME,
@@ -32,6 +31,7 @@ pub struct Packet {
     pub task: String,
     pub path : String,
     pub urgency: Urgency,
+    pub line : i32,
 }
 
 impl Packet {
@@ -40,16 +40,23 @@ impl Packet {
             task,
             path,
             urgency,
+            line : 0,
         }
     }
 }
 
-pub fn output_todos(mode: i32, todos: LinkedList<Packet>, outputfile: Option<&str>) -> Result<(), Error> {
+pub fn output_todos(todos: LinkedList<Packet>, outputfile: Option<&str>, custom: &String) -> Result<(), Error> {
 
     let mut tables = Table::new();
-    tables.add_row(row![bFg->"TYPE",bFb->"TASK",bFw->"LOCATION"]);
+    tables.add_row(row![bFg->"TYPE",bFb->"TASK",bFw->"LOCATION",bFp->"LINE"]);
     for task in todos.iter() {
-        tables.add_row(row![ bFw->(*task).urgency, bFb->(*task).task,bFw->(*task).path]);
+        if (*task).urgency == Urgency::CUSTOM {
+            tables.add_row(row![bFw->custom , bFb->(*task).task,bFw->(*task).path,bFp->(*task).line]);
+        }
+        else {
+            tables.add_row(row![bFw->(*task).urgency , bFb->(*task).task,bFw->(*task).path,bFp->(*task).line]);
+        }
+        
     }
 
     if let Some(filename) = outputfile {
@@ -57,32 +64,31 @@ pub fn output_todos(mode: i32, todos: LinkedList<Packet>, outputfile: Option<&st
         fs::write(filename, &tables.to_string() ).expect(&format!("{} {}","Error writing to file -> ".red().bold(),filename));
     }
     
-    if mode == 1 {tables.printstd();}
+    tables.printstd();
 
     Ok(())
 }
 
-
-pub fn get_size<P>(path: P) -> std::io::Result<u64> where P: AsRef<Path>,{
+pub fn get_size(gitignore: &Option<Vec<String>>, path: &String) -> Option<u64> {
     let mut result = 0;
+    let files = if let Ok(open_file) = fs::read_dir(&path) {open_file} else {return None;};
 
-    if path.as_ref().is_dir() {
-        for entry in read_dir(&path)? {
-            let _path = entry?.path();
-            if _path.is_file() {
-                result += _path.metadata()?.len();
-            } else {
-                result += get_size(_path)?;
+    for entry in files {
+        if let Ok(_entry) = entry{
+            let ignorable = should_ignore(gitignore, &_entry);
+            if !_entry.path().is_dir() && !ignorable {
+                result += _entry.metadata().unwrap().len();
+            } 
+            else if !ignorable {
+                result += if let Some(res) = get_size(gitignore,&_entry.path().into_os_string().into_string().unwrap()){res} else {0}
             }
         }
-    } else {
-        result = path.as_ref().metadata()?.len();
     }
-    Ok(result)
+    
+    Some(result)
 }
 
-
-fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut LinkedList<Packet>) -> Result<(),Error> {
+fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut LinkedList<Packet>, custom : &String) -> Result<(),Error> {
     
     if let Ok(entire_file) = read_to_string(filename.path()){
         let parser = CommentParser::new(entire_file.as_str(), comment_rules);
@@ -94,7 +100,7 @@ fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut Linked
                     "FIXME" => {Urgency::FIXME},
                     "HACK" => {Urgency::HACK},
                     "XXX" => {Urgency::XXX},
-                    _ => {continue;},
+                    other => {if other == custom {Urgency::CUSTOM} else {continue;}},
                 };
 
                 let pack = Packet::new(_urgency.1.to_string(), filename.path().into_os_string().into_string().unwrap(), urgency);
@@ -114,7 +120,7 @@ fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut Linked
     return Ok(());
 }
 
-fn get_todos(filename: &DirEntry) -> Option<LinkedList<Packet>> {
+fn get_todos(filename: &DirEntry, custom : &String) -> Option<LinkedList<Packet>> {
 
     let pathy = filename.path();
     let rules = if let Ok(syntax_rules) = get_syntax_from_path(pathy){
@@ -127,7 +133,7 @@ fn get_todos(filename: &DirEntry) -> Option<LinkedList<Packet>> {
     let mut todos:LinkedList<Packet> = LinkedList::new();
     
 
-    if let Ok(_) = matcher(filename, rules, &mut todos){
+    if let Ok(_) = matcher(filename, rules, &mut todos, custom){
         return Some(todos);
     }
     else {
@@ -135,25 +141,34 @@ fn get_todos(filename: &DirEntry) -> Option<LinkedList<Packet>> {
     }
 }
 
+fn should_ignore(gitignore: &Option<Vec<String>>, this_file: &DirEntry) -> bool{
+    if let Some(gitfiles) = gitignore {
+        for filename in gitfiles {
+            if this_file.path().into_os_string().into_string().unwrap().ends_with(filename){
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
-pub fn iter_dir(path: String, pb: &ProgressBar, gitignore: &Option<HashSet<String>>) -> Result<(i32,i32, LinkedList<Packet>), Error> {
+pub fn iter_dir(path: String, pb: &Option<ProgressBar>, gitignore: &Option<Vec<String>>, custom : &String) -> Result<(i32,i32, LinkedList<Packet>), Error> {
     let files = if let Ok(open_file) = fs::read_dir(&path) {open_file} else {return Err(Error::new(ErrorKind::Other, format!("{} {}", "Could not read the directory:".red().bold(),path)));};
 
     let mut todos:LinkedList<Packet> = LinkedList::new();
     let mut filecount = 0;
     let mut fileopenned = 0;
+    let mut ignorable;
 
     for file in files {                                                     
-        if let Ok(ref this_file) = file {                                               
-            if let Some(gitfiles) = gitignore {
-                if gitfiles.contains(&this_file.path().into_os_string().into_string().unwrap()) {
-                    continue;
-                }
-            }
-            if !this_file.path().is_dir() {                                                      
-                pb.inc(this_file.metadata().expect("Cant open this files metadata: ").len());
+        if let Ok(ref this_file) = file { 
+                                                       
+            ignorable = should_ignore(gitignore,this_file);
+
+            if !this_file.path().is_dir() && !ignorable {                                                      
+                if let Some(_pb) = pb {_pb.inc(this_file.metadata().expect("Cant open this files metadata: ").len());}
                 filecount += 1;
-                if let Some(mut b) = get_todos(this_file) {
+                if let Some(mut b) = get_todos(this_file, custom) {
                     fileopenned += 1;
                     todos.append(&mut b);
                 }
@@ -161,8 +176,8 @@ pub fn iter_dir(path: String, pb: &ProgressBar, gitignore: &Option<HashSet<Strin
                     continue;
                 }
             }
-            else {
-                if let Ok((numc,numo,mut packs)) = iter_dir(this_file.path().into_os_string().into_string().unwrap(),&pb, gitignore)  {
+            else if !ignorable {
+                if let Ok((numc,numo,mut packs)) = iter_dir(this_file.path().into_os_string().into_string().unwrap(),&pb, gitignore, custom)  {
                     todos.append(&mut packs);
                     filecount += numc;
                     fileopenned += numo;
@@ -171,7 +186,6 @@ pub fn iter_dir(path: String, pb: &ProgressBar, gitignore: &Option<HashSet<Strin
                     println!("{}{}","Could not open file/directory: ".red().bold(), this_file.file_name().as_os_str().to_str().unwrap());
                     continue;
                 };
-                
             }
         }
         else {
@@ -181,9 +195,7 @@ pub fn iter_dir(path: String, pb: &ProgressBar, gitignore: &Option<HashSet<Strin
     return Ok((filecount,fileopenned,todos));
 }
 
-
-
-pub fn get_ignorables() -> Option<HashSet<String>> {
+pub fn get_ignorables() -> Option<Vec<String>> {
     let file = if let Ok(_file) = File::open(".gitignore"){
         _file
     }
@@ -191,11 +203,25 @@ pub fn get_ignorables() -> Option<HashSet<String>> {
         return None;
     };
     let reader = BufReader::new(file);
-    let mut ignorables = HashSet::new();
-
+    let mut ignorables:Vec<String> = Vec::new();
+    ignorables.push(".git".to_string());
     for line in reader.lines() {
-        if let Ok(_line) = line {ignorables.insert(_line);}
+        if let Ok(_line) = line {ignorables.push(_line);}
     }
-    println!("{:?}",ignorables);
     return Some(ignorables);
+}
+
+pub fn get_lines(todos: &mut LinkedList<Packet>) {
+    for item in todos.iter_mut() {
+        if let Ok(entire_file) = fs::read_to_string(&item.path) {
+            let mut line_num = 1;
+            for line in entire_file.lines() {
+                if line.contains(&item.task){
+                    item.line = line_num;
+                    break;
+                }
+                line_num += 1;
+            }
+        }
+    }
 }
