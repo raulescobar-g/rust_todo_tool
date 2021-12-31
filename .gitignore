@@ -2,3 +2,4 @@
 .DS_Store
 todos.txt
 Cargo.lock
+/static

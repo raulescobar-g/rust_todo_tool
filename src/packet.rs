@@ -8,6 +8,7 @@ use std::fmt;
 use prettytable::{Table};
 use chrono::prelude::*;
 
+//TODO: add a way to have multiple custom keywords
 #[derive(PartialEq)]
 pub enum Urgency {
     TODO,
@@ -28,6 +29,8 @@ impl fmt::Display for Urgency {
        }
     }
 }
+
+//TODO: include the date that the task was added to the list
 pub struct Packet {
     pub task: String,
     pub path : String,
@@ -46,6 +49,7 @@ impl Packet {
     }
 }
 
+//TODO: perhaps make table printing async
 pub fn output_todos(todos: LinkedList<Packet>, outputfile: Option<&str>, custom: &String) -> Result<(), Error> {
 
     let mut tables = Table::new();
@@ -71,6 +75,7 @@ pub fn output_todos(todos: LinkedList<Packet>, outputfile: Option<&str>, custom:
     Ok(())
 }
 
+//FIXME: getting size for progress bar almost doubles execution time
 pub fn get_size(gitignore: &Option<Vec<String>>, path: &String) -> Option<u64> {
     let mut result = 0;
     let files = if let Ok(open_file) = fs::read_dir(&path) {open_file} else {return None;};
@@ -96,6 +101,7 @@ pub fn get_size(gitignore: &Option<Vec<String>>, path: &String) -> Option<u64> {
     Some(result)
 }
 
+// TODO: have a custom comment parser so that we can get line number the same time we get the task
 fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut LinkedList<Packet>, custom : &String) -> Result<(),Error> {
     
     if let Ok(entire_file) = read_to_string(filename.path()){
@@ -128,6 +134,7 @@ fn matcher(filename: &DirEntry, comment_rules: &[SyntaxRule], todos: &mut Linked
     return Ok(());
 }
 
+
 fn get_todos(filename: &DirEntry, custom : &String) -> Option<LinkedList<Packet>> {
 
     let pathy = filename.path();
@@ -148,7 +155,7 @@ fn get_todos(filename: &DirEntry, custom : &String) -> Option<LinkedList<Packet>
         return None;
     }
 }
-
+// FIXME: gitignore file matching not robust
 fn should_ignore(gitignore: &Option<Vec<String>>, this_file: &DirEntry) -> bool{
     if let Some(gitfiles) = gitignore {
         for filename in gitfiles {
@@ -160,6 +167,7 @@ fn should_ignore(gitignore: &Option<Vec<String>>, this_file: &DirEntry) -> bool{
     return false;
 }
 
+//TODO: split this giant function into more modular functions
 pub fn iter_dir(path: String, pb: &Option<ProgressBar>, gitignore: &Option<Vec<String>>, custom : &String) -> Result<(i32,i32, LinkedList<Packet>), Error> {
     let files = if let Ok(open_file) = fs::read_dir(&path) {open_file} else {return Err(Error::new(ErrorKind::Other, format!("{} {}", "Could not read the directory:".red().bold(),path)));};
 
@@ -203,6 +211,7 @@ pub fn iter_dir(path: String, pb: &Option<ProgressBar>, gitignore: &Option<Vec<S
     return Ok((filecount,fileopenned,todos));
 }
 
+//FIXME: make getting these gitignore files more robust
 pub fn get_ignorables() -> Option<Vec<String>> {
     let file = if let Ok(_file) = File::open(".gitignore"){
         _file
@@ -219,6 +228,7 @@ pub fn get_ignorables() -> Option<Vec<String>> {
     return Some(ignorables);
 }
 
+//XXX: doubles execution time
 pub fn get_lines(todos: &mut LinkedList<Packet>) {
     for item in todos.iter_mut() {
         if let Ok(entire_file) = fs::read_to_string(&item.path) {

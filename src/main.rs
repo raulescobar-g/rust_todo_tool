@@ -1,4 +1,3 @@
-//#[macro_use] extern crate clap;
 #[macro_use] extern crate prettytable;
 mod packet;
 use crate::packet::*;
@@ -8,15 +7,10 @@ use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use clap::{Arg, App}; 
 
-//TODO: print perhaps like the path in a tree if requested in args (mehhh maybe not idk ill see)
-//TODO: package app somehow
-//TODO: deploy to homebrew
-//TODO: write some tests
-//TODO: seperate the functionality into seperate files
-//TODO: figure out the github actions
 
-//TODO: in the end do async stuff or threaded with rayon to speed it up and benchmark
 
+//TODO: setup github actions
+//TODO: package app 
 fn main() -> Result<(), Error>{
  
     let matches = App::new("todo police").version("0.1.0").author("Raul E. <raul3@microanalisis.com>").about("Todo comments aggregator.")
@@ -50,7 +44,7 @@ fn main() -> Result<(), Error>{
     else {
         None
     };
-    
+    //TODO: print perhaps like the path in a tree if requested in args
     let (files_traversed, files_openned, mut todos): (i32,i32, LinkedList<Packet>) = iter_dir(root, &pb, &gitignore, &custom.to_string()).expect(&format!("{}","Expecting Vector of data packets ".red().bold()));
 
     get_lines(&mut todos);
@@ -65,3 +59,5 @@ fn main() -> Result<(), Error>{
 
     
 }
+
+//TODO: write some tests
